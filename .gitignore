@@ -1,0 +1,10 @@
+node_modules/
+sandbox/
+*.log
+.DS_Store
+SECURITY_REPORT.aux
+SECURITY_REPORT.log
+SECURITY_REPORT.toc
+output.json
+output-utf8.json
+scratch/
