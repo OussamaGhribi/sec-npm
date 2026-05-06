@@ -1,12 +1,21 @@
 {
   "name": "sec-npm",
-  "version": "1.0.0",
+  "version": "1.0.1",
+  "license": "MIT",
   "description": "A CLI tool to scan npm packages for suspicious scripts before installation",
   "main": "index.js",
   "type": "module",
   "bin": {
     "sec-npm": "./index.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OussamaGhribi/sec-npm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/OussamaGhribi/sec-npm/issues"
+  },
+  "homepage": "https://github.com/OussamaGhribi/sec-npm#readme",
   "scripts": {
     "start": "node index.js"
   },
@@ -16,6 +25,7 @@
     "axios": "^1.16.0",
     "chalk": "^5.6.2",
     "commander": "^11.0.0",
+    "is-odd": "^3.0.1",
     "tar": "^6.1.11"
   }
 }

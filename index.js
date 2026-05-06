@@ -9,7 +9,7 @@ const program = new Command();
 program
   .name('sec-npm')
   .description('The ultra-secure npm wrapper to prevent supply-chain attacks')
-  .version('1.0.0');
+  .version('1.0.1');
 
 function printResult(result, options) {
   if (options.json) {
@@ -17,8 +17,13 @@ function printResult(result, options) {
     return;
   }
 
-  const { threshold = 50, force = false } = options;
+  const { threshold = 50, force = false, detailed = false } = options;
   const isBlocked = result.finalScore > threshold && !force;
+
+  if (result.status === 'SAFE' && result.finalScore === 0) {
+    console.log(`${chalk.green.bold('✅ SAFE:')} ${chalk.cyan(result.packageName)}@${result.version} passed all security checks.`);
+    return false;
+  }
 
   console.log(`\n${chalk.bold('Package:')} ${chalk.cyan(result.packageName)}`);
   console.log(`${chalk.bold('Version:')} ${result.version}`);
@@ -36,7 +41,6 @@ function printResult(result, options) {
     console.log(chalk.bgRed.white.bold('\n 🛑 CRITICAL WARNINGS: '));
     result.warnings.forEach(w => {
       console.log(`  - ${chalk.red.bold(w.type)}: ${w.detail}`);
-      if (w.target) console.log(`    ${chalk.yellow('Target:')} ${w.target}`);
     });
   }
 
@@ -44,15 +48,20 @@ function printResult(result, options) {
     console.log(chalk.yellow(`\n⚠️  Installation Scripts Detected:`));
     result.suspiciousScripts.forEach(s => {
       console.log(`  - ${chalk.bold(s.name)}: ${chalk.italic(s.cmd)}`);
-      if (s.dangerous.length > 0) console.log(`    ${chalk.red('🔥 Dangerous patterns:')} ${s.dangerous.join(', ')}`);
     });
   }
 
   if (result.deepStaticFindings && result.deepStaticFindings.length > 0) {
-    console.log(chalk.red(`\n🔍 Deep Static Analysis Findings:`));
-    result.deepStaticFindings.forEach(f => {
-      console.log(`  [${chalk.bold(f.type)}] in ${chalk.blue(f.file)}: ${f.detail}`);
-    });
+    if (detailed) {
+      console.log(chalk.red(`\n🔍 Detailed Static Analysis Findings:`));
+      result.deepStaticFindings.forEach(f => {
+        console.log(`  [${chalk.bold(f.type)}] in ${chalk.blue(f.file)}: ${f.detail}`);
+      });
+    } else {
+      const fileCount = new Set(result.deepStaticFindings.map(f => f.file)).size;
+      console.log(chalk.yellow(`\n🔍 Deep Analysis: Found ${chalk.bold(result.deepStaticFindings.length)} AST anomalies in ${chalk.bold(fileCount)} files.`));
+      console.log(chalk.gray(`   (Use -d for full file-by-file details)`));
+    }
   }
 
   if (result.dynamicAnomalies && result.dynamicAnomalies.length > 0) {
@@ -64,7 +73,6 @@ function printResult(result, options) {
 
   if (isBlocked) {
     console.log(`\n${chalk.bgRed.white.bold(' ❌ INSTALLATION BLOCKED ')}`);
-    console.log(chalk.red(`Risk score ${result.finalScore} exceeds threshold ${threshold}.`));
     return true;
   } else {
     if (result.finalScore > threshold && force) {
@@ -72,7 +80,7 @@ function printResult(result, options) {
     } else if (result.status === 'SAFE') {
       console.log(`\n${chalk.green.bold('✅ This package appears to be safe.')}`);
     } else {
-      console.log(`\n${chalk.yellow.bold('⚠️  Recommendation:')} Manually review the findings above before installing.`);
+      console.log(`\n${chalk.yellow.bold('⚠️  Recommendation:')} Manually review the summary above before installing.`);
     }
     return false;
   }
@@ -83,7 +91,6 @@ program
   .description('Perform static analysis on a package')
   .action(async (packageName) => {
     try {
-      console.log(chalk.blue(`\nScanning ${packageName}...`));
       const result = await performStaticAnalysis(packageName);
       console.log(JSON.stringify(result, null, 2));
     } catch (err) {
@@ -94,13 +101,13 @@ program
 
 program
   .command('check <packageName>')
-  .description('Perform full security audit (Static + Shadow Execution)')
+  .description('Perform full security audit')
+  .option('-d, --detailed', 'Show detailed file-by-file findings')
   .option('-t, --threshold <score>', 'Risk threshold (default: 50)', parseInt)
-  .option('-f, --force', 'Force allow even if risk exceeds threshold')
-  .option('--json', 'Output results in JSON format')
+  .option('--json', 'Output in JSON format')
   .action(async (packageName, options) => {
     try {
-      console.log(chalk.blue(`\n🚀 Starting full security audit for ${chalk.bold(packageName)}...`));
+      console.log(chalk.blue(`\n🚀 Auditing ${chalk.bold(packageName)}...`));
       const result = await performFullAnalysis(packageName);
       printResult(result, options);
     } catch (err) {
@@ -110,33 +117,28 @@ program
   });
 
 program
-  .command('install <packageName>')
-  .description('Securely install a package (audits before installing)')
+  .command('i <packageName>')
+  .alias('install')
+  .description('Securely install a package')
+  .option('-d, --detailed', 'Show detailed findings if audit flags issues')
   .option('-t, --threshold <score>', 'Risk threshold (default: 50)', parseInt)
-  .option('-f, --force', 'Force install even if risk exceeds threshold')
+  .option('-f, --force', 'Force install')
   .action(async (packageName, options) => {
     try {
-      console.log(chalk.blue(`\n🛡️  Auditing ${chalk.bold(packageName)} before installation...`));
+      console.log(chalk.blue(`\n🛡️  Auditing ${chalk.bold(packageName)}...`));
       const result = await performFullAnalysis(packageName);
       const isBlocked = printResult(result, options);
 
       if (isBlocked) {
-        console.log(chalk.red('\nInstallation aborted for security reasons.'));
+        console.log(chalk.red('\nInstallation aborted. Use --force to override.'));
         process.exit(1);
       }
 
-      console.log(chalk.green(`\nAudit passed. Proceeding with npm install ${packageName}...`));
-      
+      console.log(chalk.green(`\nAudit passed. Installing ${packageName}...`));
       const npmInstall = spawn('npm', ['install', packageName], { stdio: 'inherit', shell: true });
-      
       npmInstall.on('close', (code) => {
-        if (code === 0) {
-          console.log(chalk.bgGreen.black.bold('\n ✨ Package installed successfully and securely! '));
-        } else {
-          console.log(chalk.red(`\nnpm install failed with code ${code}`));
-        }
+        if (code === 0) console.log(chalk.bgGreen.black.bold('\n ✨ Package installed successfully! '));
       });
-
     } catch (err) {
       console.error(chalk.red(`Error: ${err.message}`));
       process.exit(1);
